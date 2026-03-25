@@ -8,6 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Bodega Pro v8.0 — A2K Digital Studio</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════
@@ -821,7 +822,11 @@ canvas{max-width:100%!important}
             <div class="section-title">Inventario</div>
             <div class="section-sub" style="margin-bottom:0">Gestión de productos y stock</div>
           </div>
-          <button class="btn btn-primary" onclick="openAddProduct()">+ Nuevo Producto</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="openAddProduct()">+ Nuevo Producto</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('importExcel').click()" title="Importar productos desde Excel o CSV">📥 Carga Masiva</button>
+            <input type="file" id="importExcel" accept=".xlsx,.xls,.csv" style="display:none" onchange="importarInventario(this)">
+          </div>
         </div>
         <div class="inv-toolbar">
           <input type="text" class="form-input inv-search" placeholder="🔍 Buscar..." id="invSearch" oninput="renderInventario()" style="flex:1;min-width:180px">
@@ -5768,4 +5773,45 @@ window.verificarEstadoLicencia = verificarEstadoLicencia;
 window.verificarMicroServer = verificarMicroServer;
 window.verifyDemoSignature = verifyDemoSignature;
 window.verifyLicenseSignature = verifyLicenseSignature;
+
+function importarInventario(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type: 'array'});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+      let importados = 0;
+      rows.forEach(row => {
+        const nombre = row['Nombre'] || row['nombre'] || row['NOMBRE'];
+        const precio = parseFloat(row['Precio'] || row['precio'] || row['PRECIO'] || 0);
+        const stock = parseInt(row['Stock'] || row['stock'] || row['STOCK'] || 0);
+        const categoria = row['Categoria'] || row['categoria'] || row['Categoría'] || 'General';
+        const costo = parseFloat(row['Costo'] || row['costo'] || 0);
+        const codigo = row['Codigo'] || row['codigo'] || row['Código'] || '';
+        if (nombre) {
+          const producto = {
+            id: Date.now() + Math.random(),
+            nombre, precio, stock, categoria, costo, codigo,
+            activo: true
+          };
+          if (typeof productos !== 'undefined') {
+            productos.push(producto);
+            importados++;
+          }
+        }
+      });
+      if (typeof saveData === 'function') saveData();
+      if (typeof renderInventario === 'function') renderInventario();
+      showToast('✅ ' + importados + ' productos importados correctamente', 'success');
+    } catch(e) {
+      showToast('❌ Error al leer el archivo. Usa formato Excel o CSV.', 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  input.value = '';
+}
 </script>
