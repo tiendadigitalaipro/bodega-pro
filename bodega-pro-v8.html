@@ -6057,7 +6057,7 @@ function _ejecutarBackup(auto) {
     productos:   DB.get('productos')   || [],
     clientes:    DB.get('clientes')    || [],
     ventas:      DB.get('ventas')      || [],
-    caja_movs:   DB.get('caja_movs')  || [],
+    caja_movimientos: DB.get('caja_movimientos') || [],
     fiados:      DB.get('fiados')      || [],
     proveedores: DB.get('proveedores') || [],
     config:      DB.get('config')      || {},
@@ -6116,7 +6116,10 @@ var _pinBuffer = '';
 var _pinActivo = false;
 var _pinMode   = 'pin';
 
+var _accesoRapidoInit = false;
 function initAccesoRapido() {
+  if (_accesoRapidoInit) { actualizarEstadoPIN(); return; }
+  _accesoRapidoInit = true;
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState !== 'visible') return;
     var appEl = document.getElementById('app');
@@ -6382,9 +6385,7 @@ document.addEventListener('DOMContentLoaded', function(){
       _renderBackupHistorial();
     }
   };
-  // Iniciar respaldo y acceso rápido si la app ya está activa
-  if (typeof initAutoBackup   === 'function') initAutoBackup();
-  if (typeof initAccesoRapido === 'function') initAccesoRapido();
+  // NO llamar aquí — startApp() ya los inicializa para evitar duplicados
 });
 </script>
 
