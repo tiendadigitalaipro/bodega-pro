@@ -568,6 +568,8 @@ canvas{max-width:100%!important}
   .bento-grid{grid-template-columns:repeat(2,1fr)}
   .bento-item.span2,.bento-item.span3{grid-column:span 2}
   .bento-item.span4{grid-column:span 2}
+  /* Configuración: columna única en móvil para que Respaldo y PIN sean visibles */
+  #page-configuracion .grid-2{grid-template-columns:1fr}
 }
 /* ─── PIN OVERLAY ─────────────────────────────────────── */
 #pinOverlay{display:none;position:fixed;inset:0;background:rgba(8,8,15,0.97);z-index:99990;align-items:center;justify-content:center;flex-direction:column}
@@ -1139,8 +1141,14 @@ canvas{max-width:100%!important}
             <div class="card mb-4">
               <div class="card-title mb-3">📦 Respaldo Automático</div>
               <div class="form-group">
-                <label class="form-label">Hora del Respaldo Diario</label>
+                <label class="form-label">⏰ Hora del Respaldo Diario</label>
                 <select id="cfg-backup-hora" class="form-select">
+                  <option value="6">6:00 AM</option>
+                  <option value="7">7:00 AM</option>
+                  <option value="8">8:00 AM</option>
+                  <option value="12">12:00 PM</option>
+                  <option value="17">5:00 PM</option>
+                  <option value="18">6:00 PM</option>
                   <option value="19">7:00 PM</option>
                   <option value="20">8:00 PM</option>
                   <option value="21" selected>9:00 PM</option>
@@ -1154,6 +1162,13 @@ canvas{max-width:100%!important}
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn btn-primary btn-sm" onclick="saveBackupConfig()">💾 Guardar Hora</button>
                 <button class="btn btn-ghost btn-sm" onclick="hacerBackupManual()">📤 Respaldar Ahora</button>
+              </div>
+              <!-- Historial de Respaldos -->
+              <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+                <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.5px">📋 HISTORIAL DE RESPALDOS</div>
+                <div id="backup-historial-list">
+                  <div style="font-size:12px;color:var(--text2);text-align:center;padding:10px">Sin respaldos registrados aún</div>
+                </div>
               </div>
             </div>
 
@@ -2003,7 +2018,16 @@ window.onload = function() {
   const session = DB.get('session');
   if (session && session.deviceId === DEVICE_ID) {
     STATE.user = session;
-    startApp();
+    var _tienePin    = !!DB.get('pin_acceso');
+    var _tienePatron = !!DB.get('patron_acceso');
+    if (_tienePin || _tienePatron) {
+      startApp();
+      setTimeout(function() {
+        if (typeof mostrarPinOverlay === 'function') mostrarPinOverlay();
+      }, 250);
+    } else {
+      startApp();
+    }
   }
 
   // ── Event delegation global (fix scope) ──
@@ -5199,9 +5223,148 @@ function cerrarCaja() {
 
 // registrarMovCaja reemplazada por versión mejorada
 
-// ── QR SCANNER (stub) ──
+// ── QR / BARCODE SCANNER ──
 function openQRScanner(contexto) {
-  showToast('Escáner QR requiere cámara del dispositivo. Usa el buscador manual.','warn');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showToast('Tu navegador no soporta cámara. Usa Chrome actualizado.', 'warn');
+    return;
+  }
+
+  // ── Crear modal overlay ──
+  var overlay = document.createElement('div');
+  overlay.id = 'qrScannerOverlay';
+  overlay.style.cssText = [
+    'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.96)',
+    'display:flex;flex-direction:column;align-items:center;justify-content:center',
+    'padding:20px;box-sizing:border-box'
+  ].join(';');
+
+  overlay.innerHTML =
+    '<div style="color:var(--neon);font-size:17px;font-weight:700;margin-bottom:14px;letter-spacing:1px">📷 ESCÁNER DE CÓDIGO DE BARRAS</div>' +
+    '<div style="position:relative;width:min(92vw,420px);height:min(58vw,280px);background:#000;border-radius:14px;overflow:hidden;border:2px solid var(--neon);box-shadow:0 0 20px rgba(6,214,160,0.3)">' +
+      '<video id="qrVideo" style="width:100%;height:100%;object-fit:cover" autoplay muted playsinline></video>' +
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">' +
+        '<div style="position:relative;width:220px;height:90px">' +
+          '<div style="position:absolute;inset:0;border:2px solid var(--neon);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>' +
+          '<div style="position:absolute;top:-1px;left:-1px;width:20px;height:20px;border-top:3px solid var(--neon);border-left:3px solid var(--neon);border-radius:3px 0 0 0"></div>' +
+          '<div style="position:absolute;top:-1px;right:-1px;width:20px;height:20px;border-top:3px solid var(--neon);border-right:3px solid var(--neon);border-radius:0 3px 0 0"></div>' +
+          '<div style="position:absolute;bottom:-1px;left:-1px;width:20px;height:20px;border-bottom:3px solid var(--neon);border-left:3px solid var(--neon);border-radius:0 0 0 3px"></div>' +
+          '<div style="position:absolute;bottom:-1px;right:-1px;width:20px;height:20px;border-bottom:3px solid var(--neon);border-right:3px solid var(--neon);border-radius:0 0 3px 0"></div>' +
+          '<div id="scanLine" style="position:absolute;top:0;left:4px;right:4px;height:2px;background:linear-gradient(90deg,transparent,var(--neon),transparent);animation:scanAnim 1.5s linear infinite"></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<style>@keyframes scanAnim{0%{top:4px}50%{top:calc(100% - 6px)}100%{top:4px}}</style>' +
+    '<div id="qrStatus" style="color:var(--text2);margin-top:14px;font-size:13px;text-align:center;max-width:380px">Apunta la cámara al código de barras o QR...</div>' +
+    '<canvas id="qrCanvas" style="display:none"></canvas>' +
+    '<div style="display:flex;gap:10px;margin-top:18px">' +
+      '<button onclick="cerrarQRScanner()" style="padding:10px 32px;background:var(--danger);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;letter-spacing:0.5px">✕ Cancelar</button>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  var video   = document.getElementById('qrVideo');
+  var canvas  = document.getElementById('qrCanvas');
+  var ctx     = canvas.getContext('2d');
+  var stream  = null;
+  var scanInt = null;
+  var found   = false;
+
+  window.cerrarQRScanner = function() {
+    found = true;
+    if (scanInt) clearInterval(scanInt);
+    if (stream) stream.getTracks().forEach(function(t){ t.stop(); });
+    var el = document.getElementById('qrScannerOverlay');
+    if (el) el.remove();
+  };
+
+  function aplicarCodigo(codigo) {
+    if (found) return;
+    found = true;
+    cerrarQRScanner();
+    if (contexto === 'pos') {
+      var inp = document.getElementById('posSearch');
+      if (inp) { inp.value = codigo; try { renderPosProducts(); } catch(e){} inp.focus(); }
+    } else if (contexto === 'producto') {
+      var inp2 = document.getElementById('prod-codigo');
+      if (inp2) { inp2.value = codigo; try { verificarCodigoExistente(); } catch(e){} }
+    }
+    showToast('✅ Código escaneado: ' + codigo, 'success');
+  }
+
+  function mostrarError(msg) {
+    var st = document.getElementById('qrStatus');
+    if (st) st.innerHTML = '<span style="color:var(--danger)">' + msg + '</span>';
+  }
+
+  // ── Iniciar cámara ──
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+  }).then(function(s) {
+    stream = s;
+    video.srcObject = s;
+    video.play();
+
+    // ── Opción 1: BarcodeDetector (nativo Chrome, sin internet, EAN-13 + QR + Code128) ──
+    if ('BarcodeDetector' in window) {
+      var barcodeFormats = ['ean_13','ean_8','code_128','code_39','code_93','qr_code','upc_a','upc_e','itf','codabar','data_matrix','pdf417'];
+      var detector;
+      try {
+        detector = new BarcodeDetector({ formats: barcodeFormats });
+      } catch(e) {
+        detector = new BarcodeDetector();
+      }
+      var st = document.getElementById('qrStatus');
+      if (st) st.textContent = 'Cámara activa — apunta al código...';
+      scanInt = setInterval(function() {
+        if (found || video.readyState < 2) return;
+        detector.detect(video).then(function(barcodes) {
+          if (barcodes && barcodes.length > 0 && !found) {
+            aplicarCodigo(barcodes[0].rawValue);
+          }
+        }).catch(function(){});
+      }, 120);
+
+    } else {
+      // ── Opción 2: jsQR como fallback (QR codes) ──
+      var st2 = document.getElementById('qrStatus');
+      if (st2) st2.textContent = 'Cargando escáner alternativo...';
+
+      function iniciarJsQR() {
+        var st3 = document.getElementById('qrStatus');
+        if (st3) st3.textContent = 'Cámara activa — apunta al código QR...';
+        scanInt = setInterval(function() {
+          if (found || video.readyState < 2 || !video.videoWidth) return;
+          canvas.width  = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          try {
+            var code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+            if (code && code.data && !found) aplicarCodigo(code.data);
+          } catch(e){}
+        }, 150);
+      }
+
+      if (typeof jsQR !== 'undefined') {
+        iniciarJsQR();
+      } else {
+        var script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+        script.onload  = iniciarJsQR;
+        script.onerror = function() {
+          mostrarError('⚠️ Sin soporte de escáner en este navegador.<br>Usa <strong>Google Chrome</strong> para escanear códigos de barras.');
+        };
+        document.head.appendChild(script);
+      }
+    }
+
+  }).catch(function(err) {
+    var msg = err.name === 'NotAllowedError'
+      ? '❌ Permiso de cámara denegado. Permite el acceso en el navegador.'
+      : '❌ No se pudo acceder a la cámara: ' + (err.message || err.name || err);
+    mostrarError(msg);
+  });
 }
 
 // ── AUTO EMOJI CATEGORIA ──
@@ -6293,7 +6456,38 @@ function _ejecutarBackup(auto) {
   var f    = new Date().toLocaleDateString('es-VE').replace(/\//g,'-');
   a.download = 'bodega-backup-' + (auto?'auto':'manual') + '-' + f + '.json';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+  // Guardar en historial
+  var hist = DB.get('backup_historial') || [];
+  hist.unshift({ fecha: new Date().toISOString(), tipo: auto ? 'Automático' : 'Manual', archivo: a.download });
+  if (hist.length > 10) hist = hist.slice(0, 10);
+  DB.set('backup_historial', hist);
+  _renderBackupHistorial();
+
   showToast(auto ? '📦 Respaldo automático guardado' : '📦 Respaldo descargado', 'success');
+}
+
+function _renderBackupHistorial() {
+  var el = document.getElementById('backup-historial-list');
+  if (!el) return;
+  var hist = DB.get('backup_historial') || [];
+  if (!hist.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text2);text-align:center;padding:10px">Sin respaldos registrados aún</div>';
+    return;
+  }
+  el.innerHTML = hist.map(function(h) {
+    var d = new Date(h.fecha);
+    var fechaStr = d.toLocaleDateString('es-VE', { day:'2-digit', month:'short', year:'numeric' });
+    var horaStr  = d.toLocaleTimeString('es-VE', { hour:'2-digit', minute:'2-digit' });
+    var colorTipo = h.tipo === 'Automático' ? 'var(--neon)' : 'var(--accent)';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;margin-bottom:5px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid var(--border)">'
+      + '<div>'
+      + '<span style="font-size:12px;color:' + colorTipo + ';font-weight:700">' + (h.tipo === 'Automático' ? '🔄' : '📤') + ' ' + h.tipo + '</span>'
+      + '<div style="font-size:10px;color:var(--text2);margin-top:2px">' + fechaStr + ' · ' + horaStr + '</div>'
+      + '</div>'
+      + '<span style="font-size:10px;color:var(--neon);background:rgba(6,214,160,0.08);padding:3px 8px;border-radius:6px;border:1px solid rgba(6,214,160,0.2)">✓ Guardado</span>'
+      + '</div>';
+  }).join('');
 }
 
 function saveBackupConfig() {
@@ -6301,8 +6495,9 @@ function saveBackupConfig() {
   var cfg = DB.get('config') || {};
   cfg.backupHora = h;
   DB.set('config', cfg);
-  var names = {19:'7 PM',20:'8 PM',21:'9 PM',22:'10 PM',23:'11 PM'};
-  showToast('⏰ Respaldo programado para las ' + (names[h]||h+':00'), 'success');
+  var names = {6:'6 AM',7:'7 AM',8:'8 AM',12:'12 PM',17:'5 PM',18:'6 PM',19:'7 PM',20:'8 PM',21:'9 PM',22:'10 PM',23:'11 PM'};
+  showToast('⏰ Respaldo programado para las ' + (names[h] || h + ':00'), 'success');
+  _renderBackupHistorial();
 }
 function hacerBackupManual() { _ejecutarBackup(false); }
 
@@ -6570,6 +6765,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var sel=document.getElementById('cfg-backup-hora');
       if(sel && cfg.backupHora != null) sel.value = cfg.backupHora;
       actualizarEstadoPIN();
+      _renderBackupHistorial();
     }
   };
 });
